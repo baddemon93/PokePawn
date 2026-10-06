@@ -7,15 +7,22 @@ Rules:
 """
 
 CONFIG = {
+    # ── Local Store Search ────────────────────────────────────────────────
+    "location": {
+        "zip": "80938",
+        "state": "CO",
+        "radius_miles": 25,
+    },
+
     # ── Timing ────────────────────────────────────────────────────────────────
     "check_interval_seconds":  30,
     "alert_cooldown_seconds":  240,
 
     # ── Notifications ─────────────────────────────────────────────────────────
-    "notifications": ["macos", "discord", "sms"],
+    "notifications": ["macos", "discord"],
 
     # ── Discord ───────────────────────────────────────────────────────────────
-    "discord_webhook_url": "YOUR_DISCORD_WEBHOOK_URL_HERE",
+    "discord_webhook_url": "https://discord.com/api/webhooks/1556392517430415524/QQCZ0y4KV9-oW-sn0MEqFf4CDN0C-TYayubpvtDYA3EsfEawFnmKoBJgBxjFfSpUx1xW",
     "discord_ping_everyone": False,
 
     # ── Multi-channel Discord webhooks ────────────────────────────────────────
@@ -70,6 +77,9 @@ CONFIG = {
 PRODUCT_TIERS = {
     1: [
         # PC exclusives, UPCs, SPCs — highest demand, check every 5s
+        "30th Celebration",
+        "30th Anniversary",
+        "Delta Reign",
         "Prismatic Evolutions ETB",
         "Prismatic Evolutions Super Premium",
         "Ascended Heroes PC ETB",
@@ -569,6 +579,23 @@ PRODUCTS = [
     {"name": "Blooming Waters Premium Collection - GameStop",
      "retailer": "gamestop",
      "url": "https://www.gamestop.com/toys-games/trading-cards/products/pokemon-trading-card-game-blooming-waters-premium-collection/20018822.html"},
+
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 30TH CELEBRATION — PRIORITY PRODUCTS
+    # ══════════════════════════════════════════════════════════════════════════
+
+    {"name": "30th Celebration ETB - Target",
+     "retailer": "target",
+     "url": "https://www.target.com/p/-/A-1010892076"},
+
+    {"name": "30th Celebration ETB - Best Buy",
+     "retailer": "bestbuy",
+     "url": "https://www.bestbuy.com/product/pokemon-trading-card-game-30th-celebration-elite-trainer-box/JJG2TL8XCJ/sku/6685559"},
+
+    {"name": "30th Celebration UPC Day or Night - Best Buy",
+     "retailer": "bestbuy",
+     "url": "https://www.bestbuy.com/product/pokemon-trading-card-game-30th-celebration-ultra-premium-collection-day-or-night-1-ultra-premium-collection-per-order-styles-may-vary/JJG2TL8254/sku/6685563"},
 
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1120,4 +1147,313 @@ PRODUCTS = [
      "retailer": "pokemon_center",
      "url": "https://www.pokemoncenter.com/product/290-85065/pokemon-tcg-scarlet-violet-obsidian-flames-charizard-ex-special-collection"},
 
+
+    # Costco
+    {
+        "name": 'Charizard ex Super-Premium Collection - Costco',
+        "retailer": 'costco',
+        "url": 'https://www.costco.com/p/-/pokmon-tcg-charizard-ex-super-premium-collection/4000313298',
+    },
+    {
+        "name": 'Unova Heavy Hitters Premium Collection 2-Pack - Costco',
+        "retailer": 'costco',
+        "url": 'https://www.costco.com/CompareProductsDisplay?partNumbers=1943158',
+    },
+    {
+        "name": 'Mega Charizard X ex UPC 2-Pack - Costco',
+        "retailer": 'costco',
+        "url": 'https://www.costco.com/CompareProductsDisplay?partNumbers=4000433058',
+    },
+    {
+        "name": 'Charizard ex Super-Premium Collection - Costco Warehouse',
+        "retailer": 'costco_instore',
+        "url": 'https://www.costco.com/p/-/pokmon-tcg-charizard-ex-super-premium-collection/4000313298',
+    },
+    {
+        "name": 'Unova Heavy Hitters Premium Collection 2-Pack - Costco Warehouse',
+        "retailer": 'costco_instore',
+        "url": 'https://www.costco.com/CompareProductsDisplay?partNumbers=1943158',
+    },
+    {
+        "name": 'Mega Charizard X ex UPC 2-Pack - Costco Warehouse',
+        "retailer": 'costco_instore',
+        "url": 'https://www.costco.com/CompareProductsDisplay?partNumbers=4000433058',
+    },
+
+    # AUTO-GENERATED IN-STORE MIRRORS
+    {
+        "name": 'Prismatic Evolutions Surprise Box - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/2025-pokemon-scarlet-violet-s8-5-prismatic-evolutions-surprise-box/-/A-94336414',
+    },
+    {
+        "name": 'Prismatic Evolutions Surprise Box - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pokemon-Trading-Card-Games-Scarlett-Violet-8-5-Prismatic-Evolutions-Surprise-Box/14148473268',
+    },
+    {
+        "name": 'Prismatic Evolutions Surprise Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-scarlet-violet-prismatic-evolutions-surprise-box/JJG2TLCK6H',
+    },
+    {
+        "name": 'Prismatic Evolutions Lucario ex & Tyranitar ex Collection - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pokemon-tcg-scarlet-violet-prismatic-evolutions-lucario-ex-tyranitar-ex-premium-collection-box-14-packs/-/A-1005879863',
+    },
+    {
+        "name": 'Prismatic Evolutions Costco 2-Pack ETB+Bundle - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pokemon-Prismatic-Evolutions-Elite-Trainer-Box-Booster-Bundle/16817304907',
+    },
+    {
+        "name": 'Twilight Masquerade ETB - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-twilight-masquerade-elite-trainer-box/-/A-91619960',
+    },
+    {
+        "name": 'Twilight Masquerade ETB - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pokemon-Trading-Card-Games-SV6-Twilight-Masquerade-Elite-Trainer-Box/5558569421',
+    },
+    {
+        "name": 'Twilight Masquerade ETB - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-twilight-masquerade-elite-trainer-box/J3YSYH8XK6',
+    },
+    {
+        "name": 'Twilight Masquerade Booster Box - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pokemon-TCG-Twilight-Masquerade-Booster-Box-36-Packs/5736034613',
+    },
+    {
+        "name": 'Destined Rivals PC ETB - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pok-mon-TCG-Scarlet-Violet-Destined-Rivals-Pok-mon-Center-Elite-Trainer-Box/15718673510',
+    },
+    {
+        "name": 'Destined Rivals Booster Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-scarlet-violet-destined-rivals-booster-box-36-packs/JJG2TL25CG',
+    },
+    {
+        "name": 'Journey Together Booster Bundle - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-journey-together-booster-bundle/-/A-94300074',
+    },
+    {
+        "name": 'Journey Together Enhanced Booster Box - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pok-mon-TCG-Scarlet-Violet-9-Journey-Together-Enhanced-Booster-Display/15053563608',
+    },
+    {
+        "name": 'Journey Together Booster Bundle - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-trading-card-game-scarlet-violet-journey-together-booster-bundle-6-pk/6614264.p?skuId=6614264',
+    },
+    {
+        "name": 'White Flare ETB - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pok-233-mon-trading-card-game-scarlet-38-violet-8212-white-flare-elite-trainer-box/-/A-94636860',
+    },
+    {
+        "name": 'White Flare ETB - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pokemon-TCG-Scarlet-Violet-10-5-White-Flare-Elite-Trainer-Box-9-Packs-Promo-Card/16446322202',
+    },
+    {
+        "name": 'White Flare ETB - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-scarlet-violet-white-flare-elite-trainer-box/JJG2TL28KK',
+    },
+    {
+        "name": 'Black Bolt ETB - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pokemon-TCG-Scarlet-Violet-Black-Bolt-Elite-Trainer-Box-ETB/17317016821',
+    },
+    {
+        "name": 'Black Bolt Booster Bundle - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-trading-card-game-scarlet-violet-black-bolt-booster-bundle/6632402.p?skuId=6632402',
+    },
+    {
+        "name": 'Unova Victini Illustration Collection - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pok-233-mon-trading-card-game-unova-victini-illustration-collection/-/A-94636866',
+    },
+    {
+        "name": 'Unova Victini Illustration Collection - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pokemon-TCG-Scarlet-Violet-10-5-Unova-Victini-Illustration-Collection-4-Packs/16454274271',
+    },
+    {
+        "name": 'Unova Victini Illustration Collection - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-unova-victini-illustration-collection/JJG2TL232V',
+    },
+    {
+        "name": 'Phantasmal Flames Booster Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-mega-evolution-phantasmal-flames-booster-box-36-packs/JJG2TL3XYR',
+    },
+    {
+        "name": 'Phantasmal Flames Booster Bundle - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pok-233-mon-trading-card-game-mega-evolution-8212-phantasmal-flames-booster-bundle/-/A-94884496',
+    },
+    {
+        "name": 'Phantasmal Flames Booster Bundle - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-mega-evolution-phantasmal-flames-6pk-booster-bundle/JJG2TL3XY4',
+    },
+    {
+        "name": 'Ascended Heroes PC ETB - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pokemon-tcg-mega-evolution-ascended-heroes-pokemon-center-elite-trainer-box/-/A-1009871732',
+    },
+    {
+        "name": 'Perfect Order Booster Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-mega-evolution-perfect-order-booster-box-36-packs/JJG2TL3QWS',
+    },
+    {
+        "name": 'Mega Evolution Enhanced Booster Box - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pokemon-tcg-mega-evolution-enhanced-booster-display-box-36-packs-box-topper/-/A-1006274804',
+    },
+    {
+        "name": 'Mega Evolution Enhanced Booster Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-mega-evolution-booster-box-enhanced-version/JJG2TLXTZK',
+    },
+    {
+        "name": 'Mega Lucario ex Figure Collection - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-mega-lucario-ex-figure-collection/JJG2TLXQG2',
+    },
+    {
+        "name": 'Mega Lucario ex Figure Collection - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pokemon-ME1-Mega-Evolution-Lucario-Figure-Collection/17918917897',
+    },
+    {
+        "name": 'Celebrations Ultra Premium Collection - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pok-mon-Trading-Card-Games-25th-Anniversary-Celebrations-Ultra-Premium-Collection/718429382',
+    },
+    {
+        "name": 'Celebrations Ultra Premium Collection - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-trading-card-game-celebrations-ultra-premium-collection/6473336.p?skuId=6473336',
+    },
+    {
+        "name": 'Blooming Waters Premium Collection - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pok-233-mon-trading-card-game-blooming-waters-premium-collection/-/A-94724987',
+    },
+    {
+        "name": 'Blooming Waters Premium Collection - Walmart (In-Store)',
+        "retailer": 'walmart_instore',
+        "url": 'https://www.walmart.com/ip/Pok-mon-TCG-Blooming-Waters-Premium-Collection/15130366484',
+    },
+    {
+        "name": 'Blooming Waters Premium Collection - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-blooming-waters-premium-collection/JJG2TL25QK',
+    },
+    {
+        "name": '30th Celebration ETB - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/-/A-1010892076',
+    },
+    {
+        "name": '30th Celebration ETB - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-30th-celebration-elite-trainer-box/JJG2TL8XCJ/sku/6685559',
+    },
+    {
+        "name": '30th Celebration UPC Day or Night - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/product/pokemon-trading-card-game-30th-celebration-ultra-premium-collection-day-or-night-1-ultra-premium-collection-per-order-styles-may-vary/JJG2TL8254/sku/6685563',
+    },
+    {
+        "name": 'Surging Sparks Booster Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-surging-sparks-booster-display-box/6596536.p',
+    },
+    {
+        "name": 'Stellar Crown ETB - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-stellar-crown-elite-trainer-box/6586671.p',
+    },
+    {
+        "name": 'Stellar Crown Booster Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-stellar-crown-booster-display-box/6586673.p',
+    },
+    {
+        "name": 'Shrouded Fable ETB - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pok-mon-trading-card-game-scarlet-violet-shrouded-fable-elite-trainer-box/-/A-91193088',
+    },
+    {
+        "name": 'Shrouded Fable ETB - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-shrouded-fable-elite-trainer-box/6585398.p',
+    },
+    {
+        "name": 'Temporal Forces ETB - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-temporal-forces-elite-trainer-box/6570616.p',
+    },
+    {
+        "name": 'Temporal Forces Booster Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-temporal-forces-booster-display-box/6570618.p',
+    },
+    {
+        "name": 'Paldean Fates ETB - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-paldean-fates-elite-trainer-box/6569612.p',
+    },
+    {
+        "name": 'Pokemon 151 ETB - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-151-elite-trainer-box/6556966.p',
+    },
+    {
+        "name": 'Pokemon 151 Booster Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-151-booster-display-box/6556968.p',
+    },
+    {
+        "name": 'Paradox Rift ETB - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pok-mon-trading-card-game-scarlet-violet-paradox-rift-elite-trainer-box/-/A-88821898',
+    },
+    {
+        "name": 'Paradox Rift ETB - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-paradox-rift-elite-trainer-box/6562793.p',
+    },
+    {
+        "name": 'Paradox Rift Booster Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-paradox-rift-booster-display-box/6562795.p',
+    },
+    {
+        "name": 'Obsidian Flames ETB - Target (In-Store)',
+        "retailer": 'target_instore',
+        "url": 'https://www.target.com/p/pok-mon-trading-card-game-scarlet-violet-obsidian-flames-elite-trainer-box/-/A-88459342',
+    },
+    {
+        "name": 'Obsidian Flames ETB - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-obsidian-flames-elite-trainer-box/6554891.p',
+    },
+    {
+        "name": 'Obsidian Flames Booster Box - Best Buy (In-Store)',
+        "retailer": 'bestbuy_instore',
+        "url": 'https://www.bestbuy.com/site/pokemon-tcg-scarlet-violet-obsidian-flames-booster-display-box/6554893.p',
+    },
 ]

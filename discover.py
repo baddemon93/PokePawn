@@ -95,24 +95,193 @@ async def search_walmart(session, query: str) -> list[dict]:
 
 
 async def search_bestbuy(session, query: str) -> list[dict]:
+    """
+    Search Best Buy's normal public search page.
+
+    The older /api/2.0/json/search endpoint is unreliable, so discovery
+    uses the same public search results a normal browser sees.
+    """
     results = []
-    api = (
-        f"https://www.bestbuy.com/api/2.0/json/search"
-        f"?q={quote_plus(query)}&type=product&categoryId=pcmcat203400050006&pageSize=5"
+
+    url = (
+        "https://www.bestbuy.com/site/searchpage.jsp"
+        f"?id=pcat17071&st={quote_plus(query)}"
     )
+
     try:
-        async with session.get(api, headers={**HEADERS, "Accept": "application/json"},
-                               timeout=aiohttp.ClientTimeout(total=15)) as r:
-            if r.status == 200:
-                data = await r.json()
-                for item in data.get("products", [])[:5]:
-                    sku  = item.get("sku", "")
-                    name = item.get("name", "")
-                    url  = item.get("url", "")
-                    if sku and name:
-                        results.append({"name": name, "url": f"https://www.bestbuy.com{url}", "retailer": "bestbuy"})
+        async with session.get(
+            url,
+            headers=HEADERS,
+            timeout=aiohttp.ClientTimeout(total=8),
+            allow_redirects=True,
+        ) as r:
+
+            if r.status != 200:
+                print(f"  Best Buy search HTTP {r.status}")
+                return results
+
+            text = await r.text()
+
+            # Best Buy product URLs currently use forms such as:
+            # /product/product-name/JJG2TL8QGY
+            # /product/product-name/JJG2TL8QGY/sku/6689672
+            patterns = [
+                r'href=["\']([^"\']*/product/[^"\']+)["\']',
+                r'"url":"([^"]*/product/[^"]+)"',
+            ]
+
+            urls = []
+
+            for pattern in patterns:
+                for found in re.findall(pattern, text, re.I):
+                    found = found.replace("\\u002F", "/")
+                    found = found.replace("\\/", "/")
+                    found = found.replace("&amp;", "&")
+
+                    if found.startswith("/"):
+                        found = "https://www.bestbuy.com" + found
+                    elif found.startswith("www.bestbuy.com"):
+                        found = "https://" + found
+
+                    if not found.startswith("http"):
+                        continue
+
+                    # Strip query strings/fragments for deduplication.
+                    found = found.split("?")[0].split("#")[0]
+
+                    if found not in urls:
+                        urls.append(found)
+
+            # Extract a readable name from the product URL.
+            for product_url in urls:
+                lower = product_url.lower()
+
+                # Discovery should only retain Pokemon products.
+                if "pokemon" not in lower and "pok-mon" not in lower:
+                    continue
+
+                path = product_url.split("/product/", 1)[-1]
+                slug = path.split("/")[0]
+
+                if not slug:
+                    continue
+
+                name = (
+                    slug
+                    .replace("-", " ")
+                    .replace("%C3%A9", "é")
+                    .replace("%c3%a9", "é")
+                    .strip()
+                    .title()
+                )
+
+                # Query relevance filter. Require at least one meaningful
+                # query token to appear in the product URL/name.
+                query_words = [
+                    word.lower()
+                    for word in re.findall(r"[A-Za-z0-9]+", query)
+                    if len(word) >= 4
+                ]
+
+                haystack = f"{name} {product_url}".lower()
+
+                if query_words and not any(
+                    word in haystack for word in query_words
+                ):
+                    continue
+
+                results.append({
+                    "name": name,
+                    "url": product_url,
+                    "retailer": "bestbuy",
+                })
+
+            # Deduplicate by URL.
+            unique = {}
+            for product in results:
+                unique[product["url"]] = product
+
+            results = list(unique.values())[:20]
+
     except Exception as e:
-        print(f"  Best Buy search error: {e}")
+        print(f"  Best Buy search error: {type(e).__name__}: {e}")
+
+    return results
+
+
+async def search_costco(session, query: str) -> list[dict]:
+    """Search Costco's public website for matching products."""
+    results = []
+
+    url = (
+        "https://www.costco.com/CatalogSearch"
+        f"?keyword={quote_plus(query)}"
+    )
+
+    try:
+        async with session.get(
+            url,
+            headers=HEADERS,
+            timeout=aiohttp.ClientTimeout(total=20)
+        ) as r:
+
+            if r.status != 200:
+                print(f"  Costco search HTTP {r.status}")
+                return results
+
+            text = await r.text()
+
+            # Costco currently exposes product links in forms such as:
+            # /p/-/product-name/4000123456
+            # product-name.product.4000123456.html
+            patterns = [
+                r'href=["\'](https?://www\.costco\.com/p/-/[^"\']+)["\']',
+                r'href=["\'](/p/-/[^"\']+)["\']',
+                r'href=["\'](https?://www\.costco\.com/[^"\']+\.product\.[^"\']+\.html[^"\']*)["\']',
+                r'href=["\'](/[^"\']+\.product\.[^"\']+\.html[^"\']*)["\']',
+            ]
+
+            urls = []
+
+            for pattern in patterns:
+                for found in re.findall(pattern, text, re.I):
+                    if found.startswith("/"):
+                        found = "https://www.costco.com" + found
+
+                    found = found.replace("&amp;", "&")
+
+                    if found not in urls:
+                        urls.append(found)
+
+            # Keep Pokemon-related Costco results.
+            for product_url in urls:
+                lower_url = product_url.lower()
+
+                if "pokemon" not in lower_url and "pok%C3%A9mon" not in lower_url:
+                    continue
+
+                slug = product_url.split("?")[0].rstrip("/").split("/")[-1]
+
+                if ".product." in slug:
+                    slug = slug.split(".product.")[0]
+
+                name = (
+                    slug.replace("-", " ")
+                        .replace("%C3%A9", "é")
+                        .replace("%c3%a9", "é")
+                        .strip()
+                        .title()
+                )
+
+                results.append({
+                    "name": name or f"Costco Pokemon - {query}",
+                    "url": product_url,
+                    "retailer": "costco",
+                })
+
+    except Exception as e:
+        print(f"  Costco search error: {e}")
+
     return results
 
 

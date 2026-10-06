@@ -36,3 +36,15 @@ env/
 
 # Twilio / secrets — never commit these
 # Make sure config.py has empty strings for twilio account_sid / auth_token
+
+# PokePawn Gmail credentials
+.env
+
+# PokePawn development backups
+*.before-*
+*.backup
+*.backup-*
+*.bak
+
+# Debug artifacts
+costco-debug.html
