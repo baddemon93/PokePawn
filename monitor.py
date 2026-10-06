@@ -3199,12 +3199,9 @@ async def check_product(session, product: dict):
         # (for example: CAPTCHA, anti-bot challenge, timeout, or unknown status).
         # Preserve the previous stock state and DO NOT treat it as OOS.
         if in_stock is None:
-            n = error_counts.get(name, 0) + 1
-            error_counts[name] = n
-            cycle_stats[name]["errors"] += 1
-
-            # Telemetry classification happens below after we inspect
-            # the retailer detail string.
+            # Do not increment product error counters yet.
+            # UNKNOWN results are classified below as either neutral
+            # or genuine errors after inspecting the retailer detail.
 
             # Unknown means UNKNOWN — never convert a timeout, challenge,
             # CAPTCHA, or network failure into an out-of-stock event.
@@ -3330,6 +3327,15 @@ async def check_product(session, product: dict):
                 "neutral" if neutral_unknown else "error",
             )
 
+            # Only genuine UNKNOWN failures count as product errors.
+            # Expected/unsupported inventory results remain neutral.
+            if neutral_unknown:
+                n = neutral_counts.get(name, 0) + 1
+            else:
+                n = error_counts.get(name, 0) + 1
+                error_counts[name] = n
+                cycle_stats[name]["errors"] += 1
+
             # ------------------------------------------------------
             # Per-product neutral backoff
             # ------------------------------------------------------
@@ -3343,7 +3349,7 @@ async def check_product(session, product: dict):
             # A genuine failure breaks the neutral streak and continues
             # through the normal failure/circuit-breaker path below.
             if neutral_unknown:
-                neutral_n = neutral_counts.get(name, 0) + 1
+                neutral_n = n
                 neutral_counts[name] = neutral_n
 
                 if neutral_n == 1:
@@ -3465,7 +3471,7 @@ async def check_product(session, product: dict):
                             f"{WALMART_INSTORE_CIRCUIT_SECONDS}s"
                         )
 
-            if n <= 3 or n % 20 == 0:
+            if not neutral_unknown and (n <= 3 or n % 20 == 0):
                 retry_text = (
                     f" — retry in {retry_delay}s"
                     if retry_delay
