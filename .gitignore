@@ -48,3 +48,7 @@ env/
 
 # Debug artifacts
 costco-debug.html
+node_modules/
+
+# Best Buy development/test scripts
+test-bestbuy-*.js

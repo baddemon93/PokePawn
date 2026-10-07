@@ -446,7 +446,7 @@ error_counts:     dict[str, int]   = {}
 bestbuy_confirmations: dict[str, int] = {}
 
 # Limit concurrent Best Buy requests to prevent request bursts.
-BESTBUY_SEMAPHORE = asyncio.Semaphore(2)
+BESTBUY_SEMAPHORE = asyncio.Semaphore(3)
 
 # Target is especially sensitive to request bursts.
 TARGET_SEMAPHORE = asyncio.Semaphore(1)
@@ -475,15 +475,15 @@ NEUTRAL_BACKOFF_1 = 120   # 1st neutral  -> 2 minutes
 NEUTRAL_BACKOFF_2 = 300   # 2nd neutral  -> 5 minutes
 NEUTRAL_BACKOFF_3 = 900   # 3rd+ neutral -> 15 minutes
 
-BESTBUY_FAILURE_BACKOFF = 60
-TARGET_FAILURE_BACKOFF = 120
+BESTBUY_FAILURE_BACKOFF = 180
+TARGET_FAILURE_BACKOFF = 300
 
 # Retailer-wide circuit breakers.
 retailer_circuit_until: dict[str, float] = {}
 retailer_failure_counts: dict[str, int] = {}
 
-TARGET_CIRCUIT_SECONDS = 120
-BESTBUY_CIRCUIT_SECONDS = 60
+TARGET_CIRCUIT_SECONDS = 300
+BESTBUY_CIRCUIT_SECONDS = 180
 BESTBUY_CIRCUIT_FAILURES = 3
 
 COSTCO_CIRCUIT_SECONDS = 120
@@ -1145,7 +1145,7 @@ async def check_target(session, url) -> tuple[bool, str, str]:
         async with session.get(
             api,
             headers=api_headers("target"),
-            timeout=aiohttp.ClientTimeout(total=18),
+            timeout=aiohttp.ClientTimeout(total=20),
         ) as r:
 
             # PerimeterX / Target anti-bot challenge.
@@ -1443,6 +1443,373 @@ async def check_gamestop(session, url) -> tuple[bool, str, str]:
     return False, "—", f"HTTP {r.status}"
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BEST BUY PLAYWRIGHT FALLBACK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_bestbuy_browser_process = None
+_bestbuy_browser_start_lock = asyncio.Lock()
+_bestbuy_browser_write_lock = asyncio.Lock()
+_bestbuy_browser_reader_task = None
+_bestbuy_browser_request_id = 0
+_bestbuy_browser_pending = {}
+
+
+async def _bestbuy_browser_reader(proc):
+    """
+    Continuously read responses from the Node worker and route each
+    response to the Python request waiting for that response ID.
+    """
+    global _bestbuy_browser_process
+    global _bestbuy_browser_reader_task
+
+    try:
+        while True:
+            raw = await proc.stdout.readline()
+
+            if not raw:
+                break
+
+            try:
+                result = json.loads(
+                    raw.decode("utf-8", errors="replace")
+                )
+            except Exception:
+                log.warning(
+                    "⚠️ BESTBUY BROWSER — invalid JSON response"
+                )
+                continue
+
+            request_id = result.get("id")
+
+            future = _bestbuy_browser_pending.pop(
+                request_id,
+                None,
+            )
+
+            if future is not None and not future.done():
+                future.set_result(result)
+
+    except asyncio.CancelledError:
+        raise
+
+    except Exception as e:
+        log.warning(
+            f"⚠️ BESTBUY BROWSER reader error: "
+            f"{type(e).__name__}"
+        )
+
+    finally:
+        # Wake every request currently waiting on this worker.
+        error = RuntimeError(
+            "Best Buy browser worker stopped"
+        )
+
+        for future in list(
+            _bestbuy_browser_pending.values()
+        ):
+            if not future.done():
+                future.set_exception(error)
+
+        _bestbuy_browser_pending.clear()
+
+        if _bestbuy_browser_process is proc:
+            _bestbuy_browser_process = None
+
+        if _bestbuy_browser_reader_task is asyncio.current_task():
+            _bestbuy_browser_reader_task = None
+
+
+async def _stop_bestbuy_browser():
+    """Terminate the persistent Best Buy Playwright worker."""
+    global _bestbuy_browser_process
+    global _bestbuy_browser_reader_task
+
+    proc = _bestbuy_browser_process
+    reader = _bestbuy_browser_reader_task
+
+    _bestbuy_browser_process = None
+    _bestbuy_browser_reader_task = None
+
+    if reader is not None and reader is not asyncio.current_task():
+        reader.cancel()
+
+    if proc is not None:
+        try:
+            if proc.returncode is None:
+                proc.terminate()
+
+                try:
+                    await asyncio.wait_for(
+                        proc.wait(),
+                        timeout=5,
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+
+        except ProcessLookupError:
+            pass
+        except Exception:
+            pass
+
+    error = RuntimeError(
+        "Best Buy browser worker stopped"
+    )
+
+    for future in list(
+        _bestbuy_browser_pending.values()
+    ):
+        if not future.done():
+            future.set_exception(error)
+
+    _bestbuy_browser_pending.clear()
+
+
+async def _start_bestbuy_browser():
+    """Start or return the persistent Node/Playwright worker."""
+    global _bestbuy_browser_process
+    global _bestbuy_browser_reader_task
+
+    if (
+        _bestbuy_browser_process is not None
+        and _bestbuy_browser_process.returncode is None
+        and _bestbuy_browser_reader_task is not None
+        and not _bestbuy_browser_reader_task.done()
+    ):
+        return _bestbuy_browser_process
+
+    async with _bestbuy_browser_start_lock:
+
+        # Another coroutine may have started it while we waited.
+        if (
+            _bestbuy_browser_process is not None
+            and _bestbuy_browser_process.returncode is None
+            and _bestbuy_browser_reader_task is not None
+            and not _bestbuy_browser_reader_task.done()
+        ):
+            return _bestbuy_browser_process
+
+        worker = (
+            Path(__file__).resolve().parent
+            / "bestbuy_browser.js"
+        )
+
+        if not worker.exists():
+            raise FileNotFoundError(
+                f"Best Buy browser worker not found: {worker}"
+            )
+
+        proc = await asyncio.create_subprocess_exec(
+            "/usr/local/bin/node",
+            str(worker),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            cwd=str(worker.parent),
+        )
+
+        _bestbuy_browser_process = proc
+
+        _bestbuy_browser_reader_task = asyncio.create_task(
+            _bestbuy_browser_reader(proc)
+        )
+
+        log.info(
+            f"🌐 BESTBUY BROWSER — Playwright worker started "
+            f"(pid={proc.pid})"
+        )
+
+        return proc
+
+
+async def _bestbuy_browser_request(url):
+    """
+    Send one request to the persistent Node worker.
+
+    Multiple callers may wait concurrently. Responses are routed
+    by request ID by _bestbuy_browser_reader().
+    """
+    global _bestbuy_browser_request_id
+
+    proc = await _start_bestbuy_browser()
+
+    loop = asyncio.get_running_loop()
+
+    _bestbuy_browser_request_id += 1
+    request_id = _bestbuy_browser_request_id
+
+    future = loop.create_future()
+
+    _bestbuy_browser_pending[request_id] = future
+
+    request = (
+        json.dumps({
+            "id": request_id,
+            "url": url,
+        })
+        + "\n"
+    ).encode("utf-8")
+
+    try:
+        async with _bestbuy_browser_write_lock:
+            if (
+                proc.returncode is not None
+                or proc.stdin is None
+            ):
+                raise RuntimeError(
+                    "Best Buy browser worker unavailable"
+                )
+
+            proc.stdin.write(request)
+            await proc.stdin.drain()
+
+        return await asyncio.wait_for(
+            future,
+            timeout=80,
+        )
+
+    except Exception:
+        _bestbuy_browser_pending.pop(
+            request_id,
+            None,
+        )
+
+        if not future.done():
+            future.cancel()
+
+        raise
+
+
+async def check_bestbuy_browser(
+    url,
+) -> tuple[bool | None, str, str]:
+    """
+    Query the persistent Playwright worker.
+
+    Explicit OOS states -> False
+    Add to Cart         -> None until seller is verified
+    Ambiguous states    -> None
+    """
+
+    # One retry is allowed if the worker itself dies.
+    for attempt in range(2):
+        try:
+            result = await _bestbuy_browser_request(url)
+
+            state = str(
+                result.get("state", "UNKNOWN")
+            ).upper()
+
+            price = result.get("price") or "—"
+
+            detail = str(
+                result.get("detail") or ""
+            ).strip()
+
+            elapsed = result.get("elapsed")
+
+            elapsed_text = (
+                f" ({elapsed:.1f}s)"
+                if isinstance(elapsed, (int, float))
+                else ""
+            )
+
+            if state == "ADD_TO_CART_BESTBUY":
+                seller = result.get("seller") or "Best Buy"
+
+                return (
+                    True,
+                    price,
+                    f"Browser ADD_TO_CART_BESTBUY — {seller}"
+                    f"{elapsed_text}",
+                )
+
+            if state == "MARKETPLACE":
+                seller = result.get("seller") or "Marketplace"
+
+                return (
+                    False,
+                    price,
+                    f"Browser MARKETPLACE — {seller}"
+                    f"{elapsed_text}",
+                )
+
+            if state in (
+                "UNAVAILABLE",
+                "SOLD_OUT",
+                "COMING_SOON",
+            ):
+                return (
+                    False,
+                    price,
+                    f"Browser {state}{elapsed_text}",
+                )
+
+            # Do NOT generate a restock alert until the
+            # selected seller has been verified.
+            if state == "ADD_TO_CART_UNVERIFIED":
+                return (
+                    None,
+                    price,
+                    f"Browser ADD_TO_CART_UNVERIFIED"
+                    f"{elapsed_text}",
+                )
+
+            if state == "PRE_ORDER_UNVERIFIED":
+                return (
+                    None,
+                    price,
+                    f"Browser PRE_ORDER_UNVERIFIED"
+                    f"{elapsed_text}",
+                )
+
+            detail_text = (
+                f" — {detail}"
+                if detail
+                else ""
+            )
+
+            return (
+                None,
+                price,
+                f"Browser {state}{detail_text}{elapsed_text}",
+            )
+
+        except asyncio.TimeoutError:
+            # A request timeout does not automatically mean the
+            # entire worker is bad. Return neutral rather than
+            # killing requests belonging to other products.
+            return (
+                None,
+                "—",
+                "Best Buy browser timeout",
+            )
+
+        except Exception as e:
+            # If the process actually died, restart it once.
+            proc = _bestbuy_browser_process
+
+            worker_dead = (
+                proc is None
+                or proc.returncode is not None
+            )
+
+            if worker_dead and attempt == 0:
+                await _stop_bestbuy_browser()
+                continue
+
+            return (
+                None,
+                "—",
+                f"Best Buy browser error: "
+                f"{type(e).__name__}",
+            )
+
+    return None, "—", "Best Buy browser unknown"
+
+
 async def check_bestbuy(session, url) -> tuple[bool | None, str, str]:
     """
     Best Buy availability checker.
@@ -1456,7 +1823,18 @@ async def check_bestbuy(session, url) -> tuple[bool | None, str, str]:
     if "searchpage.jsp" in url:
         return False, "—", "PRE_RELEASE_STUB"
 
-    timeout = aiohttp.ClientTimeout(total=18)
+    # ------------------------------------------------------------
+    # Modern Best Buy /product/.../JJG... URLs
+    #
+    # Direct aiohttp requests to these pages consistently time out
+    # on this host while Chromium renders them successfully.
+    # Skip the known-failing HTTP request and use the persistent
+    # Playwright worker immediately.
+    # ------------------------------------------------------------
+    if re.search(r"/product/[^?]+/[A-Z0-9]{10}(?:[/?]|$)", url, re.I):
+        return await check_bestbuy_browser(url)
+
+    timeout = aiohttp.ClientTimeout(total=25)
 
     # ------------------------------------------------------------
     # Legacy numeric SKU URLs
@@ -1489,7 +1867,7 @@ async def check_bestbuy(session, url) -> tuple[bool | None, str, str]:
             async with session.get(
                 api,
                 headers=api_headers("bestbuy"),
-                timeout=aiohttp.ClientTimeout(total=12),
+                timeout=aiohttp.ClientTimeout(total=20),
             ) as r:
 
                 if r.status == 200:
@@ -1505,7 +1883,11 @@ async def check_bestbuy(session, url) -> tuple[bool | None, str, str]:
                         state = str(btn).upper().replace(" ", "_")
 
                         if state == "ADD_TO_CART":
-                            return True, "—", "ADD_TO_CART"
+                            # The legacy buttonstate API does not prove
+                            # which seller owns the active offer. Verify
+                            # through the rendered page before declaring
+                            # the product in stock.
+                            return await check_bestbuy_browser(url)
 
                         if state in ("SOLD_OUT", "OUT_OF_STOCK", "UNAVAILABLE"):
                             return False, "—", "SOLD_OUT"
@@ -1527,8 +1909,13 @@ async def check_bestbuy(session, url) -> tuple[bool | None, str, str]:
         except (aiohttp.ClientError, asyncio.TimeoutError):
             pass
 
+        # The lightweight SKU API did not produce a definitive state.
+        # Use the rendered browser directly instead of issuing another
+        # HTTP request against the legacy product page.
+        return await check_bestbuy_browser(url)
+
     # ------------------------------------------------------------
-    # New Best Buy /product/.../JJG... URLs
+    # Remaining Best Buy page URLs
     # ------------------------------------------------------------
     try:
         async with session.get(
@@ -1635,23 +2022,34 @@ async def check_bestbuy(session, url) -> tuple[bool | None, str, str]:
                 return True, price, "PRE_ORDER"
 
             if any(sig in tl for sig in add_to_cart_signals):
-                return True, price, "ADD_TO_CART"
+                # Raw HTML may contain Marketplace or stale offer data.
+                # Verify the rendered active seller before declaring stock.
+                return await check_bestbuy_browser(url)
 
             if (
                 "schema.org/instock" in tl
                 or '"availability":"instock"' in tl
                 or '"availability":"in_stock"' in tl
             ):
-                return True, price, "IN_STOCK"
+                # Structured page data can describe a Marketplace offer.
+                # Require rendered Best Buy seller verification.
+                return await check_bestbuy_browser(url)
 
-            # Never call an ambiguous response OOS.
-            return None, price, "Best Buy availability unknown"
+            # Ambiguous HTTP response: ask the browser worker.
+            return await check_bestbuy_browser(url)
 
     except asyncio.TimeoutError:
-        return None, "—", "Best Buy timeout"
+        log.info(
+            "🌐 BESTBUY HTTP UNKNOWN — timeout; trying browser fallback"
+        )
+        return await check_bestbuy_browser(url)
 
     except aiohttp.ClientError as e:
-        return None, "—", f"Best Buy network error: {type(e).__name__}"
+        log.info(
+            f"🌐 BESTBUY HTTP UNKNOWN — {type(e).__name__}; "
+            "trying browser fallback"
+        )
+        return await check_bestbuy_browser(url)
 
 
 async def check_amazon(session, url) -> tuple[bool, str, str]:
@@ -1758,7 +2156,7 @@ async def check_target_instore(session, url) -> tuple[bool | None, str, str]:
             async with session.get(
                 api,
                 headers=api_headers("target"),
-                timeout=aiohttp.ClientTimeout(total=12),
+                timeout=aiohttp.ClientTimeout(total=20),
             ) as r:
 
                 if r.status == 435:
@@ -2024,7 +2422,7 @@ async def check_bestbuy_instore(session, url) -> tuple[bool | None, str, str]:
         async with session.get(
             api,
             headers=api_headers("bestbuy"),
-            timeout=aiohttp.ClientTimeout(total=12),
+            timeout=aiohttp.ClientTimeout(total=20),
         ) as r:
 
             if r.status != 200:
@@ -3044,6 +3442,25 @@ async def check_product(session, product: dict):
         )
     )
 
+    # Best Buy online checks use Playwright and are much heavier than
+    # normal HTTP retailer checks. Give the browser worker enough time
+    # to drain its queue instead of scheduling work faster than the
+    # three browser slots can process it.
+    if product["retailer"] == "bestbuy":
+        bb_tier = get_product_tier(name)
+
+        if critical_window:
+            interval = max(interval, 60)
+
+        elif bb_tier == 1:
+            interval = max(interval, 120)
+
+        elif bb_tier == 2:
+            interval = max(interval, 300)
+
+        else:
+            interval = max(interval, 600)
+
     if not critical_window:
         # Pokemon Center uses additional verification/queue protections.
         # During normal operation, poll it conservatively.
@@ -3317,6 +3734,17 @@ async def check_product(session, product: dict):
                         "no costco warehouses configured",
                         "no best buy stores configured",
                         "best buy numeric sku unavailable",
+
+                        # Best Buy Playwright/browser results where the
+                        # checker could not determine inventory. These are
+                        # indeterminate product observations, not evidence
+                        # that Best Buy itself is down.
+                        "best buy browser timeout",
+                        "browser browser_timeout",
+                        "browser browser_nav_error",
+                        "browser unknown",
+                        "browser add_to_cart_unverified",
+                        "browser pre_order_unverified",
                     )
                 )
             )

@@ -1,0 +1,24 @@
+{
+  "name": "pokemon-tcg-monitor",
+  "version": "1.0.0",
+  "description": "Polls 260+ products across **Target · Walmart · Pokémon Center · Best Buy · GameStop · Sam's Club · Costco** and fires instant Discord + SMS + macOS alerts the moment a product comes back in stock — before anyone else sees it.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/baddemon93/PokePawn.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/baddemon93/PokePawn/issues"
+  },
+  "homepage": "https://github.com/baddemon93/PokePawn#readme",
+  "dependencies": {
+    "playwright": "^1.63.0"
+  }
+}
