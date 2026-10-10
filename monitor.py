@@ -314,7 +314,7 @@ FAST_INTERVAL      = 10     # Tier 2 / hot pattern
 BASE_INTERVAL      = 30     # Tier 3 standard
 SLOW_INTERVAL      = 90     # stale / never-restocked
 PRICE_DROP_PCT     = 0.05   # alert if price drops >5%
-HEARTBEAT_MINS     = 240    # Discord ping every 4 hours     # Discord ping every N minutes
+HEARTBEAT_MINS     = 60    # Discord ping every 4 hours     # Discord ping every N minutes
 SURGE_DURATION     = 300    # surge lasts 5 minutes
 LAUNCH_WINDOW_DAYS = 7      # ±7 days around release = launch window
 BLITZ_WINDOW_DAYS  = 1      # ±1 day = blitz window
@@ -447,6 +447,7 @@ bestbuy_confirmations: dict[str, int] = {}
 
 # Limit concurrent Best Buy requests to prevent request bursts.
 BESTBUY_SEMAPHORE = asyncio.Semaphore(3)
+BESTBUY_INSTORE_SEMAPHORE = asyncio.Semaphore(3)
 
 # Target is especially sensitive to request bursts.
 TARGET_SEMAPHORE = asyncio.Semaphore(1)
@@ -514,7 +515,7 @@ def normalize_health_retailer(retailer: str) -> str:
     mapping = {
         "pokemon_center": "pokemon_center",
         "target": "target",
-        "target_instore": "target",
+        "target_instore": "target_instore",
         "walmart": "walmart",
         "walmart_instore": "walmart_instore",
         "bestbuy": "bestbuy",
@@ -1121,20 +1122,25 @@ async def check_target(session, url) -> tuple[bool, str, str]:
     # Keep Target requests from firing in one large simultaneous burst.
     await asyncio.sleep(random.uniform(1.0, 3.0))
 
-    zips = [
-        ("80901", "CO", "38.83", "-104.82"),
-        ("27601", "NC", "35.78", "-78.64"),
-        ("10001", "NY", "40.71", "-74.00"),
-        ("60601", "IL", "41.88", "-87.63"),
-    ]
+    # Use one coherent Target location context. Mixing a fixed store
+    # with random ZIP/state/coordinates can create an invalid request.
+    location = get_local_location()
+    stores = load_local_stores("target")
 
-    zip_code, state, latitude, longitude = random.choice(zips)
+    if not stores:
+        return None, "—", "Target local store unavailable"
+
+    store_id = stores[0]["id"]
+    zip_code = location.get("zip", "80938")
+    state = location.get("state", "CO")
+    latitude = location.get("latitude", "38.9047")
+    longitude = location.get("longitude", "-104.6634")
 
     api = (
         "https://redsky.target.com/redsky_aggregations/v1/web/pdp_client_v1"
         "?key=9f36aeafbe60771e321a7cc95a78140772ab3e96"
         f"&tcin={tcin}"
-        "&store_id=3991"
+        f"&store_id={store_id}"
         f"&zip={zip_code}"
         f"&state={state}"
         f"&latitude={latitude}"
@@ -1203,26 +1209,110 @@ async def check_target(session, url) -> tuple[bool, str, str]:
         return None, "—", f"Target error: {type(e).__name__}"
 
 
-async def check_walmart(session, url) -> tuple[bool, str, str]:
+async def check_walmart(session, url) -> tuple[bool | None, str, str]:
+    """
+    Conservative Walmart online inventory checker.
+
+    True  = explicit product-level in-stock signal
+    False = explicit product-level out-of-stock/unavailable signal
+    None  = challenge, rate limit, HTTP error, or ambiguous response
+    """
+
     if "search?q=" in url:
-        return False, "—", "Pre-release stub (not yet listed)"
+        return None, "—", "Pre-release stub"
+
     await asyncio.sleep(random.uniform(0.5, 2.0))
-    async with session.get(url, headers=random_headers("walmart"),
-                           timeout=aiohttp.ClientTimeout(total=18)) as r:
-        if r.status == 200:
-            text     = await r.text()
-            m_status = re.search(r'"availabilityStatus":"([^"]+)"', text)
-            m_price  = re.search(r'"priceString":"([^"]+)"', text)
-            m_qty    = re.search(r'"availableQuantity":(\d+)', text)
-            if m_status:
-                status   = m_status.group(1).upper()
-                price    = m_price.group(1) if m_price else "—"
-                qty      = m_qty.group(1)   if m_qty   else "?"
-                in_stock = status == "IN_STOCK"
-                return in_stock, price, f"qty={qty}" if in_stock else status
-        elif r.status == 429:
-            return False, "—", "Rate limited"
-    return False, "—", f"HTTP {r.status}"
+
+    try:
+        async with session.get(
+            url,
+            headers=random_headers("walmart"),
+            timeout=aiohttp.ClientTimeout(total=18),
+            allow_redirects=True,
+        ) as r:
+
+            if r.status == 429:
+                return None, "—", "Walmart rate limited (HTTP 429)"
+
+            if r.status != 200:
+                return None, "—", f"Walmart HTTP {r.status}"
+
+            text = await r.text(errors="ignore")
+            tl = text.lower()
+
+            # Walmart may return a challenge/blocked page with HTTP 200.
+            challenge = any(
+                marker in tl
+                for marker in (
+                    "robot or human",
+                    "/blocked?",
+                    "verify you are human",
+                    "verify your identity",
+                    "captcha",
+                    "access denied",
+                    "request blocked",
+                    "perimeterx",
+                )
+            )
+
+            if challenge:
+                return None, "—", "Walmart challenge"
+
+            m_status = re.search(
+                r'"availabilityStatus":"([^"]+)"',
+                text,
+            )
+
+            m_price = re.search(
+                r'"priceString":"([^"]+)"',
+                text,
+            )
+
+            m_qty = re.search(
+                r'"availableQuantity":(\d+)',
+                text,
+            )
+
+            price = m_price.group(1) if m_price else "—"
+
+            # HTTP 200 by itself is NOT an inventory result.
+            if not m_status:
+                return None, price, "Walmart availability unknown"
+
+            status = m_status.group(1).upper()
+
+            qty = m_qty.group(1) if m_qty else "?"
+
+            if status == "IN_STOCK":
+                return True, price, f"qty={qty}"
+
+            if status in (
+                "OUT_OF_STOCK",
+                "UNAVAILABLE",
+                "NOT_AVAILABLE",
+                "SOLD_OUT",
+            ):
+                return False, price, status
+
+            # Any state we do not explicitly understand remains UNKNOWN.
+            return None, price, f"Walmart availability unknown: {status}"
+
+    except asyncio.TimeoutError:
+        return None, "—", "Walmart timeout"
+
+    except aiohttp.ClientError as e:
+        return (
+            None,
+            "—",
+            f"Walmart network error: {type(e).__name__}",
+        )
+
+    except Exception as e:
+        return (
+            None,
+            "—",
+            f"Walmart error: {type(e).__name__}",
+        )
 
 
 async def check_costco(session, url) -> tuple[bool | None, str, str]:
@@ -2295,7 +2385,17 @@ async def check_walmart_instore(session, url) -> tuple[bool | None, str, str]:
                     return (
                         None,
                         "—",
-                        "Walmart rate limited",
+                        "Walmart rate limited (HTTP 429)",
+                    )
+
+                # Walmart's local-inventory endpoint can return HTTP 412
+                # with a PerimeterX /blocked challenge instead of inventory.
+                # This is UNKNOWN, not evidence that the item is out of stock.
+                if r.status == 412:
+                    return (
+                        None,
+                        "—",
+                        "Walmart local challenge (HTTP 412)",
                     )
 
                 if r.status != 200:
@@ -3485,8 +3585,10 @@ async def check_product(session, product: dict):
     # Retailer-wide circuit breaker.
     retailer = product["retailer"]
 
-    if retailer in ("target", "target_instore"):
+    if retailer == "target":
         circuit_key = "target"
+    elif retailer == "target_instore":
+        circuit_key = "target_instore"
     elif retailer in ("bestbuy", "bestbuy_instore"):
         circuit_key = "bestbuy"
     elif retailer == "costco":
@@ -3541,7 +3643,13 @@ async def check_product(session, product: dict):
     t0 = time.time()
     try:
         if product["retailer"] in ("bestbuy", "bestbuy_instore"):
-            async with BESTBUY_SEMAPHORE:
+            bestbuy_semaphore = (
+                BESTBUY_INSTORE_SEMAPHORE
+                if product["retailer"] == "bestbuy_instore"
+                else BESTBUY_SEMAPHORE
+            )
+
+            async with bestbuy_semaphore:
 
                 # A circuit may have opened while this task was waiting.
                 if time.time() < retailer_circuit_until.get("bestbuy", 0):
@@ -3557,8 +3665,14 @@ async def check_product(session, product: dict):
         elif product["retailer"] in ("target", "target_instore"):
             async with TARGET_SEMAPHORE:
 
+                # Target online and in-store health are independent.
+                target_circuit_key = product["retailer"]
+
                 # A circuit may have opened while this task was waiting.
-                if time.time() < retailer_circuit_until.get("target", 0):
+                if time.time() < retailer_circuit_until.get(
+                    target_circuit_key,
+                    0,
+                ):
                     return
 
                 await asyncio.sleep(random.uniform(0.25, 0.75))
@@ -3628,7 +3742,15 @@ async def check_product(session, product: dict):
                 retry_delay = BESTBUY_FAILURE_BACKOFF
 
             elif product["retailer"] in ("target", "target_instore"):
-                retry_delay = TARGET_FAILURE_BACKOFF
+                detail_lower_for_backoff = str(detail).lower()
+
+                if not (
+                    "target challenge" in detail_lower_for_backoff
+                    or "http 435" in detail_lower_for_backoff
+                    or "target rate limited" in detail_lower_for_backoff
+                    or "http 429" in detail_lower_for_backoff
+                ):
+                    retry_delay = TARGET_FAILURE_BACKOFF
 
             if retry_delay:
                 retailer_backoff_until[name] = (
@@ -3659,6 +3781,10 @@ async def check_product(session, product: dict):
                     "bad url",
                     "missing product id",
                     "unsupported inventory",
+                  "target challenge",
+                  "http 435",
+                  "target rate limited",
+                  "http 429",
                 )
             )
 
@@ -3730,6 +3856,11 @@ async def check_product(session, product: dict):
                         "costco availability unknown",
                         "warehouse inventory not exposed",
                         "walmart local inventory unavailable",
+                        "walmart local challenge",
+                        "walmart challenge",
+                        "walmart availability unknown",
+                        "http 412",
+                        "walmart rate limited",
                         "pre-release stub",
                         "no costco warehouses configured",
                         "no best buy stores configured",
@@ -3805,24 +3936,6 @@ async def check_product(session, product: dict):
                 neutral_backoff_until.pop(name, None)
 
             if (
-                retailer in ("target", "target_instore")
-                and not neutral_unknown
-            ):
-                # HTTP 435 is an explicit Target anti-bot challenge.
-                if "435" in detail or "challenge" in detail.lower():
-                    if retailer_circuit_until.get("target", 0) <= time.time():
-                        retailer_circuit_until["target"] = (
-                            time.time() + TARGET_CIRCUIT_SECONDS
-                        )
-                        retailer_failure_counts["target"] = 0
-
-                        log.warning(
-                            f"🛑 TARGET CIRCUIT OPEN — {detail}; "
-                            f"pausing all Target checks for "
-                            f"{TARGET_CIRCUIT_SECONDS}s"
-                        )
-
-            elif (
                 retailer in ("bestbuy", "bestbuy_instore")
                 and not neutral_unknown
             ):
@@ -3950,10 +4063,20 @@ async def check_product(session, product: dict):
         retailer = product["retailer"]
 
         if retailer in ("target", "target_instore"):
-            if retailer_failure_counts.get("target", 0):
-                log.info("✅ TARGET CIRCUIT HEALTHY — successful response")
-            retailer_failure_counts["target"] = 0
-            retailer_circuit_until.pop("target", None)
+            target_circuit_key = retailer
+
+            if retailer_failure_counts.get(target_circuit_key, 0):
+                target_label = (
+                    "TARGET ONLINE"
+                    if retailer == "target"
+                    else "TARGET IN-STORE"
+                )
+                log.info(
+                    f"✅ {target_label} CIRCUIT HEALTHY — successful response"
+                )
+
+            retailer_failure_counts[target_circuit_key] = 0
+            retailer_circuit_until.pop(target_circuit_key, None)
 
         elif retailer in ("bestbuy", "bestbuy_instore"):
             if retailer_failure_counts.get("bestbuy", 0):
@@ -4161,6 +4284,40 @@ def print_banner():
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
+async def heartbeat_loop(session):
+    """
+    Send health heartbeats independently of product polling.
+
+    A slow or stuck retailer/product task must never prevent the
+    system-health heartbeat from being sent.
+    """
+    interval = HEARTBEAT_MINS * 60
+
+    log.info(
+        f"💚 Heartbeat scheduler started — every "
+        f"{HEARTBEAT_MINS} minutes"
+    )
+
+    while True:
+        await asyncio.sleep(interval)
+
+        log.info("💚 Scheduled heartbeat due")
+
+        try:
+            await asyncio.wait_for(
+                send_heartbeat(session),
+                timeout=45,
+            )
+            log.info("💚 Scheduled heartbeat completed")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error(
+                f"Heartbeat background task failed: "
+                f"{type(e).__name__}: {e}"
+            )
+
+
 async def run():
     log.info("╔═══════════════════════════════════════════════════════════╗")
     log.info("║  DROP ALERT ELITE v4                                      ║")
@@ -4194,40 +4351,144 @@ async def run():
     async with aiohttp.ClientSession(connector=connector) as session:
         await validate_config(session)
 
-        last_heartbeat = time.time()
-        last_banner    = time.time()
+        last_banner = time.time()
 
-        while True:
-            results = await asyncio.gather(
-                *[check_product(session, p) for p in PRODUCTS],
-                return_exceptions=True
-            )
+        # Heartbeat runs independently from the product polling loop.
+        heartbeat_task = asyncio.create_task(
+            heartbeat_loop(session),
+            name="PokePawn Heartbeat",
+        )
 
-            # Never silently discard product-task exceptions.
-            for product, result in zip(PRODUCTS, results):
-                if isinstance(result, BaseException):
-                    log.exception(
-                        f"💥 PRODUCT TASK ERROR — "
-                        f"{product.get('name', 'unknown')} "
-                        f"[{product.get('retailer', 'unknown')}]: "
-                        f"{type(result).__name__}: {result}",
-                        exc_info=(
-                            type(result),
-                            result,
-                            result.__traceback__,
-                        ),
+        async def heartbeat_watchdog():
+            while True:
+                await asyncio.sleep(300)
+
+                log.info(
+                    f"💓 Heartbeat watchdog — "
+                    f"task_done={heartbeat_task.done()}, "
+                    f"task_cancelled={heartbeat_task.cancelled()}, "
+                    f"monotonic={time.monotonic():.1f}"
+                )
+
+                if heartbeat_task.done():
+                    try:
+                        heartbeat_task.result()
+                    except asyncio.CancelledError:
+                        log.error("💔 Heartbeat task was cancelled")
+                    except Exception:
+                        log.exception("💔 Heartbeat task crashed")
+
+        watchdog_task = asyncio.create_task(
+            heartbeat_watchdog(),
+            name="PokePawn Heartbeat Watchdog",
+        )
+
+        async def poll_group(label, products):
+            cycle_number = 0
+
+            while True:
+                cycle_number += 1
+                cycle_started = time.monotonic()
+
+                product_tasks = [
+                    asyncio.create_task(
+                        check_product(session, product),
+                        name=f"{label}: {product['name']}",
+                    )
+                    for product in products
+                ]
+
+                while True:
+                    done, pending = await asyncio.wait(
+                        product_tasks,
+                        timeout=300,
+                        return_when=asyncio.ALL_COMPLETED,
                     )
 
-            if time.time() - last_heartbeat > HEARTBEAT_MINS * 60:
-                await send_heartbeat(session)
-                last_heartbeat = time.time()
+                    if not pending:
+                        break
 
-            if time.time() - last_banner > 300:
-                print_banner()
-                last_banner = time.time()
+                    elapsed = time.monotonic() - cycle_started
 
-            # Sleep at BLITZ_INTERVAL so release-day products can poll at 3s
-            await asyncio.sleep(BLITZ_INTERVAL)
+                    from collections import Counter
+
+                    pending_indices = [
+                        i for i, task in enumerate(product_tasks)
+                        if not task.done()
+                    ]
+
+                    counts = Counter(
+                        products[i]["retailer"]
+                        for i in pending_indices
+                    )
+
+                    summary = ", ".join(
+                        f"{retailer}={count}"
+                        for retailer, count in counts.most_common()
+                    )
+
+                    log.warning(
+                        f"⏳ {label} polling cycle still running — "
+                        f"{len(pending)} pending / {len(products)} "
+                        f"after {elapsed:.0f}s; "
+                        f"heartbeat task done={heartbeat_task.done()}"
+                    )
+
+                    log.warning(
+                        f"🔎 {label} pending retailers: {summary}"
+                    )
+
+                for product, task in zip(products, product_tasks):
+                    if task.cancelled():
+                        log.warning(
+                            f"⚠️ Cancelled product task: "
+                            f"{product.get('name', 'unknown')}"
+                        )
+                        continue
+
+                    result = task.exception()
+
+                    if result is not None:
+                        log.error(
+                            f"💥 PRODUCT TASK ERROR — "
+                            f"{product.get('name', 'unknown')} "
+                            f"[{product.get('retailer', 'unknown')}]: "
+                            f"{type(result).__name__}: {result}",
+                            exc_info=(
+                                type(result),
+                                result,
+                                result.__traceback__,
+                            ),
+                        )
+
+                log.info(
+                    f"🔄 {label} polling cycle #{cycle_number} "
+                    f"completed in "
+                    f"{time.monotonic() - cycle_started:.1f}s"
+                )
+
+                await asyncio.sleep(BLITZ_INTERVAL)
+
+        bestbuy_products = [
+            p for p in PRODUCTS
+            if p["retailer"] in ("bestbuy", "bestbuy_instore")
+        ]
+
+        other_products = [
+            p for p in PRODUCTS
+            if p["retailer"] not in ("bestbuy", "bestbuy_instore")
+        ]
+
+        log.info(
+            f"🚀 Independent polling enabled — "
+            f"Best Buy: {len(bestbuy_products)} products; "
+            f"Other retailers: {len(other_products)} products"
+        )
+
+        await asyncio.gather(
+            poll_group("Best Buy", bestbuy_products),
+            poll_group("Other retailers", other_products),
+        )
 
 
 if __name__ == "__main__":
